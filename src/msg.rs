@@ -1,27 +1,47 @@
+use cosmwasm_std::Addr;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use crate::state::GenericBalance;
+
+use cw20::{Cw20ReceiveMsg};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct InstantiateMsg {
-    pub count: i32,
-}
+pub struct InstantiateMsg {}
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecuteMsg {
-    Increment {},
-    Reset { count: i32 },
+    OpenOrder(OpenOrderMsg),
+    CloseOrder { order_id: u64 },
+    /// This accepts a properly-encoded ReceiveMsg from a cw20 contract
+    Receive(Cw20ReceiveMsg),
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct OpenOrderMsg {
+    pub taker_token: GenericBalance,
+    pub target_address: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum QueryMsg {
-    // GetCount returns the current count as a json-encoded number
-    GetCount {},
+    GetOrderSender {},
 }
 
-// We define a custom struct for each query response
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct CountResponse {
-    pub count: i32,
+pub struct OrderResponse {
+    pub maker_address: Addr,
+    pub maker_token: GenericBalance,
+    pub taker_token: GenericBalance,
+    pub target_address: Option<String>,
+    pub is_open: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ReceiveMsg {
+    OpenOrder(OpenOrderMsg),
+    CloseOrder { order_id: u64 },
 }
