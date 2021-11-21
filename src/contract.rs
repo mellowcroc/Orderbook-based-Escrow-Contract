@@ -586,6 +586,31 @@ mod tests {
         assert!(matches!(err, ContractError::OrderUnmatched {}));
     }
 
+    #[test]
+    fn open_order_with_same_cw20_token_fails() {
+        let mut deps = mock_dependencies(&[]);
+        instantiate_contract(&mut deps);
+
+        let cw20_token_contract = String::from("my-cw20-token");
+        let cw20_token_amount = Uint128::new(12345);
+        let cw20_tokens = create_cw20_tokens(&cw20_token_contract, cw20_token_amount);
+
+        let msg = OpenOrderMsg {
+            taker_token: cw20_tokens.clone(),
+            target_address: None,
+        };
+        let maker = String::from("maker");
+        let receive = Cw20ReceiveMsg {
+            sender: maker.clone(),
+            amount: cw20_token_amount,
+            msg: to_binary(&ExecuteMsg::OpenOrder(msg)).unwrap(),
+        };
+        let info = mock_info(&cw20_token_contract, &[]);
+        let msg = ExecuteMsg::Receive(receive.clone());
+        let err = execute(deps.as_mut(), mock_env(), info, msg).unwrap_err();
+        assert!(matches!(err, ContractError::OrderInvalid(msg)));
+    }
+
     fn instantiate_contract(deps: &mut OwnedDeps<MockStorage, MockApi, MockQuerier, Empty>) {
         let msg = InstantiateMsg { };
         let info = mock_info("anyone", &[]);
