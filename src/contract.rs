@@ -52,7 +52,6 @@ pub fn execute_receive(
 ) -> Result<Response, ContractError> {
     let msg: ReceiveMsg = from_binary(&wrapper.msg)?;
     let balance = Balance::Cw20(Cw20CoinVerified {
-        // TODO: find a way to preserve cw20 contract address
         address: info.sender,
         amount: wrapper.amount,
     });
@@ -98,7 +97,8 @@ pub fn execute_open_order(
             }
         },
         Balance::Cw20(token) => {
-            if !message.taker_token.cw20.is_empty() && message.taker_token.cw20[0].address == sender.clone() {
+            if !message.taker_token.cw20.is_empty()
+                && message.taker_token.cw20[0].address == token.address {
                 return Err(ContractError::OrderInvalid(String::from(
                     "Maker and taker tokens cannot be the same cw20 tokens.")))
             }
@@ -169,12 +169,14 @@ pub fn execute_close_order(
     order.is_open = false;
     ORDERS.save(deps.storage, order_id.into(), &order)?;
 
-    send_tokens(&order.maker_address, &taker_order_balance);
-    send_tokens(&taker_address, &order.maker_token);
+    let maker_messages = send_tokens(&order.maker_address, &taker_order_balance)?;
+    let taker_messages = send_tokens(&taker_address, &order.maker_token)?;
 
     Ok(Response::new()
         .add_attribute("method", "close_order")
-        .add_attribute("order_id", order_id.to_string()))
+        .add_attribute("order_id", order_id.to_string())
+        .add_submessages(maker_messages)
+        .add_submessages(taker_messages))
 }
 
 fn send_tokens(to: &Addr, balance: &GenericBalance) -> StdResult<Vec<SubMsg>> {
@@ -223,7 +225,7 @@ fn query_order(deps: Deps, id: u64) -> StdResult<OrderResponse> {
 mod tests {
     use super::*;
     use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info, MockApi, MockQuerier, MockStorage};
-    use cosmwasm_std::{coins, Empty, OwnedDeps};
+    use cosmwasm_std::{coins, Empty, OwnedDeps, CosmosMsg};
 
     #[test]
     fn order_native_to_cw20() {
@@ -255,17 +257,37 @@ mod tests {
         assert_eq!(true, order.is_open);
 
         // Close the open order
+        let taker = String::from("taker");
         let receive = Cw20ReceiveMsg {
-            sender: String::from("taker"),
-            amount: Uint128::new(12345),
+            sender: taker.clone(),
+            amount: cw20_token_amount,
             msg: to_binary(&ExecuteMsg::CloseOrder{ order_id: 1 }).unwrap(),
         };
         let info = mock_info(&cw20_token_contract, &[]);
         let msg = ExecuteMsg::Receive(receive.clone());
         let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
-        assert_eq!(0, res.messages.len());
+        assert_eq!(2, res.messages.len());
         assert_eq!(("method", "close_order"), res.attributes[0]);
         assert_eq!(("order_id", "1"), res.attributes[1]);
+        let send_msg = Cw20ExecuteMsg::Transfer {
+            recipient: maker,
+            amount: cw20_token_amount,
+        };
+        assert_eq!(
+            res.messages[0],
+            SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: cw20_token_contract.clone(),
+                msg: to_binary(&send_msg).unwrap(),
+                funds: vec![]
+            }))
+        );
+        assert_eq!(
+            res.messages[1],
+            SubMsg::new(BankMsg::Send {
+                to_address: taker,
+                amount: balance,
+            })
+        );
 
         // Check that order is closed
         let order = query_order(deps.as_ref(), 1).unwrap();
@@ -308,13 +330,32 @@ mod tests {
         assert_eq!(true, order.is_open);
 
         // Close the open order
-        let maker = String::from("maker");
+        let taker = String::from("taker");
         let balance = coins(100, "native");
-        let info = mock_info(&maker, &balance);
+        let info = mock_info(&taker, &balance);
         let res = execute(deps.as_mut(), mock_env(), info, ExecuteMsg::CloseOrder{ order_id: 1 }).unwrap();
-        assert_eq!(0, res.messages.len());
+        assert_eq!(2, res.messages.len());
         assert_eq!(("method", "close_order"), res.attributes[0]);
         assert_eq!(("order_id", "1"), res.attributes[1]);
+        assert_eq!(
+            res.messages[0],
+            SubMsg::new(BankMsg::Send {
+                to_address: maker,
+                amount: balance,
+            })
+        );
+        let send_msg = Cw20ExecuteMsg::Transfer {
+            recipient: taker,
+            amount: cw20_token_amount,
+        };
+        assert_eq!(
+            res.messages[1],
+            SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: cw20_token_contract.clone(),
+                msg: to_binary(&send_msg).unwrap(),
+                funds: vec![]
+            }))
+        );
 
         // Check that order is closed
         let order = query_order(deps.as_ref(), 1).unwrap();
@@ -327,7 +368,8 @@ mod tests {
         instantiate_contract(&mut deps);
 
         let xyz_token_contract = String::from("xyz-token");
-        let xyz_tokens = create_cw20_tokens(&xyz_token_contract, Uint128::new(67890));
+        let xyz_token_amount = Uint128::new(12345);
+        let xyz_tokens = create_cw20_tokens(&xyz_token_contract, xyz_token_amount);
         let msg = OpenOrderMsg {
             taker_token: xyz_tokens.clone(),
             target_address: None,
@@ -358,16 +400,41 @@ mod tests {
         assert_eq!(true, order.is_open);
 
         // Close the open order
+        let taker = String::from("taker");
         let receive = Cw20ReceiveMsg {
-            sender: String::from("taker"),
-            amount: Uint128::new(67890),
+            sender: taker.clone(),
+            amount: xyz_token_amount,
             msg: to_binary(&ExecuteMsg::CloseOrder{ order_id: 1 }).unwrap(),
         };
         let info = mock_info(&xyz_token_contract, &[]);
         let res = execute(deps.as_mut(), mock_env(), info, ExecuteMsg::Receive(receive)).unwrap();
-        assert_eq!(0, res.messages.len());
+        assert_eq!(2, res.messages.len());
         assert_eq!(("method", "close_order"), res.attributes[0]);
         assert_eq!(("order_id", "1"), res.attributes[1]);
+        let send_msg_0 = Cw20ExecuteMsg::Transfer {
+            recipient: maker,
+            amount: xyz_token_amount,
+        };
+        assert_eq!(
+            res.messages[0],
+            SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: xyz_token_contract,
+                msg: to_binary(&send_msg_0).unwrap(),
+                funds: vec![]
+            }))
+        );
+        let send_msg_1 = Cw20ExecuteMsg::Transfer {
+            recipient: taker,
+            amount: abc_token_amount,
+        };
+        assert_eq!(
+            res.messages[1],
+            SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: abc_token_contract,
+                msg: to_binary(&send_msg_1).unwrap(),
+                funds: vec![]
+            }))
+        );
 
         // Check that order is closed
         let order = query_order(deps.as_ref(), 1).unwrap();
