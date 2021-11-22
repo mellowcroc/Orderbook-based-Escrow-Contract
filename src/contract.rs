@@ -1,14 +1,11 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
-use cosmwasm_std::{
-    from_binary, to_binary, Addr, BankMsg, Deps, DepsMut, Env, MessageInfo, Response, StdResult,
-    SubMsg, WasmMsg,
-};
+use cosmwasm_std::{from_binary, to_binary, Addr, BankMsg, Deps, DepsMut, Env, MessageInfo, Response, StdResult, SubMsg, WasmMsg, Binary};
 use cw2::set_contract_version;
 use cw20::{Balance, Cw20CoinVerified, Cw20ExecuteMsg, Cw20ReceiveMsg};
 
 use crate::error::ContractError;
-use crate::msg::{ExecuteMsg, InstantiateMsg, OpenOrderMsg, OrderResponse, ReceiveMsg};
+use crate::msg::{ExecuteMsg, InstantiateMsg, OpenOrderMsg, OrderResponse, QueryMsg, ReceiveMsg};
 use crate::state::{next_id, GenericBalance, Order, ORDERS};
 
 // version info for migration info
@@ -212,6 +209,13 @@ fn send_tokens(to: &Addr, balance: &GenericBalance) -> StdResult<Vec<SubMsg>> {
         .collect();
     msgs.append(&mut cw20_msgs?);
     Ok(msgs)
+}
+
+#[cfg_attr(not(feature = "library"), entry_point)]
+pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
+    match msg {
+        QueryMsg::Order { id } => to_binary(&query_order(deps, id)?),
+    }
 }
 
 fn query_order(deps: Deps, id: u64) -> StdResult<OrderResponse> {
