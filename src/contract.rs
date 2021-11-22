@@ -545,7 +545,7 @@ mod tests {
         let info = mock_info(&cw20_token_contract, &[]);
         let msg = ExecuteMsg::Receive(receive.clone());
         let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
-        assert_eq!(0, res.messages.len());
+        assert_eq!(2, res.messages.len());
         assert_eq!(("method", "close_order"), res.attributes[0]);
         assert_eq!(("order_id", "1"), res.attributes[1]);
     }
