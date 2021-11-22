@@ -2,9 +2,8 @@
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
     from_binary, to_binary, Addr, BankMsg, Deps, DepsMut, Env, MessageInfo, Response, StdResult,
-    SubMsg, Uint128, WasmMsg,
+    SubMsg, WasmMsg,
 };
-use cw0::NativeBalance;
 use cw2::set_contract_version;
 use cw20::{Balance, Cw20CoinVerified, Cw20ExecuteMsg, Cw20ReceiveMsg};
 
@@ -143,7 +142,6 @@ pub fn execute_close_order(
     taker_address: &Addr,
     order_id: u64,
 ) -> Result<Response, ContractError> {
-    // TODO: Do we need to handle invalid order_id with a different ContractError?
     // find the Order from the id
     let mut order = ORDERS.load(deps.storage, order_id.into())?;
     if !order.is_open {
@@ -151,13 +149,10 @@ pub fn execute_close_order(
     }
 
     // Reject if target address exists and is not equal to the order taker address
-    match &order.target_address {
-        Some(target_address) => {
-            if taker_address.clone() != deps.api.addr_validate(target_address.as_str())? {
-                return Err(ContractError::OrderReserved {});
-            }
+    if let Some(target_address) = &order.target_address {
+        if *taker_address != deps.api.addr_validate(target_address.as_str())? {
+            return Err(ContractError::OrderReserved {});
         }
-        _ => {}
     };
 
     let taker_order_balance = match balance {
@@ -179,7 +174,7 @@ pub fn execute_close_order(
     ORDERS.save(deps.storage, order_id.into(), &order)?;
 
     let maker_messages = send_tokens(&order.maker_address, &taker_order_balance)?;
-    let taker_messages = send_tokens(&taker_address, &order.maker_token)?;
+    let taker_messages = send_tokens(taker_address, &order.maker_token)?;
 
     Ok(Response::new()
         .add_attribute("method", "close_order")
@@ -236,7 +231,8 @@ mod tests {
     use cosmwasm_std::testing::{
         mock_dependencies, mock_env, mock_info, MockApi, MockQuerier, MockStorage,
     };
-    use cosmwasm_std::{coins, CosmosMsg, Empty, OwnedDeps};
+    use cosmwasm_std::{coins, CosmosMsg, Empty, OwnedDeps, Uint128};
+    use cw0::NativeBalance;
 
     #[test]
     fn order_native_to_cw20() {
@@ -481,7 +477,7 @@ mod tests {
         instantiate_contract(&mut deps);
 
         let cw20_token_contract = String::from("my-cw20-token");
-        let mut cw20_token_amount = Uint128::new(12345);
+        let cw20_token_amount = Uint128::new(12345);
         let cw20_tokens = create_cw20_tokens(&cw20_token_contract, cw20_token_amount);
 
         let msg = OpenOrderMsg {
@@ -678,7 +674,7 @@ mod tests {
         let info = mock_info(&cw20_token_contract, &[]);
         let msg = ExecuteMsg::Receive(receive.clone());
         let err = execute(deps.as_mut(), mock_env(), info, msg).unwrap_err();
-        assert!(matches!(err, ContractError::OrderInvalid(msg)));
+        assert!(matches!(err, ContractError::OrderInvalid(_msg)));
     }
 
     fn instantiate_contract(deps: &mut OwnedDeps<MockStorage, MockApi, MockQuerier, Empty>) {
