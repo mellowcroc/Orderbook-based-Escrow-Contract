@@ -64,4 +64,3 @@ pub fn next_id(store: &mut dyn Storage) -> StdResult<u64> {
     ORDER_COUNT.save(store, &id)?;
     Ok(id)
 }
-

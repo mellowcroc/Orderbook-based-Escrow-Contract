@@ -1,9 +1,9 @@
+use crate::state::GenericBalance;
 use cosmwasm_std::Addr;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use crate::state::GenericBalance;
 
-use cw20::{Cw20ReceiveMsg};
+use cw20::Cw20ReceiveMsg;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InstantiateMsg {}
@@ -12,7 +12,9 @@ pub struct InstantiateMsg {}
 #[serde(rename_all = "snake_case")]
 pub enum ExecuteMsg {
     OpenOrder(OpenOrderMsg),
-    CloseOrder { order_id: u64 },
+    CloseOrder {
+        order_id: u64,
+    },
     /// This accepts a properly-encoded ReceiveMsg from a cw20 contract
     Receive(Cw20ReceiveMsg),
 }

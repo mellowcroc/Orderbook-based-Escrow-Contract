@@ -1,15 +1,16 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    to_binary, from_binary, Addr, Deps, DepsMut, Env, MessageInfo, Response, StdResult,
-    Uint128, SubMsg, BankMsg, WasmMsg};
+    from_binary, to_binary, Addr, BankMsg, Deps, DepsMut, Env, MessageInfo, Response, StdResult,
+    SubMsg, Uint128, WasmMsg,
+};
 use cw0::NativeBalance;
 use cw2::set_contract_version;
 use cw20::{Balance, Cw20CoinVerified, Cw20ExecuteMsg, Cw20ReceiveMsg};
 
 use crate::error::ContractError;
 use crate::msg::{ExecuteMsg, InstantiateMsg, OpenOrderMsg, OrderResponse, ReceiveMsg};
-use crate::state::{GenericBalance, Order, ORDERS, next_id};
+use crate::state::{next_id, GenericBalance, Order, ORDERS};
 
 // version info for migration info
 const CONTRACT_NAME: &str = "crates.io:orderbook-escrow";
@@ -37,10 +38,10 @@ pub fn execute(
     match msg {
         ExecuteMsg::OpenOrder(msg) => {
             execute_open_order(deps, Balance::from(info.funds), &info.sender, msg)
-        },
+        }
         ExecuteMsg::CloseOrder { order_id } => {
             execute_close_order(deps, Balance::from(info.funds), &info.sender, order_id)
-        },
+        }
         ExecuteMsg::Receive(msg) => execute_receive(deps, info, msg),
     }
 }
@@ -57,10 +58,15 @@ pub fn execute_receive(
     });
     let api = deps.api;
     match msg {
-        ReceiveMsg::OpenOrder(msg) =>
-            execute_open_order(deps, balance, &api.addr_validate(&wrapper.sender)?, msg),
-        ReceiveMsg::CloseOrder { order_id } =>
-            execute_close_order(deps, balance, &api.addr_validate(&wrapper.sender)?, order_id)
+        ReceiveMsg::OpenOrder(msg) => {
+            execute_open_order(deps, balance, &api.addr_validate(&wrapper.sender)?, msg)
+        }
+        ReceiveMsg::CloseOrder { order_id } => execute_close_order(
+            deps,
+            balance,
+            &api.addr_validate(&wrapper.sender)?,
+            order_id,
+        ),
     }
 }
 
@@ -76,31 +82,37 @@ pub fn execute_open_order(
 
     if message.taker_token.native.is_empty() && message.taker_token.cw20.is_empty() {
         return Err(ContractError::OrderInvalid(String::from(
-            "At least one native/cw20 token should be specified as a taker.")))
+            "At least one native/cw20 token should be specified as a taker.",
+        )));
     } else if message.taker_token.native.is_empty() && message.taker_token.cw20.len() > 1 {
         return Err(ContractError::OrderInvalid(String::from(
-            "Only one cw20 token can be specified as a taker.")))
+            "Only one cw20 token can be specified as a taker.",
+        )));
     } else if !message.taker_token.native.is_empty() && !message.taker_token.cw20.is_empty() {
         return Err(ContractError::OrderInvalid(String::from(
-            "Only one native or cw20 token can be specified as a taker.")))
+            "Only one native or cw20 token can be specified as a taker.",
+        )));
     }
 
     let maker_order_balance = match balance {
         Balance::Native(balance) => {
             if !message.taker_token.native.is_empty() {
                 return Err(ContractError::OrderInvalid(String::from(
-                    "Maker and taker tokens cannot both be native tokens.")))
+                    "Maker and taker tokens cannot both be native tokens.",
+                )));
             }
             GenericBalance {
                 native: balance.0,
                 cw20: vec![],
             }
-        },
+        }
         Balance::Cw20(token) => {
             if !message.taker_token.cw20.is_empty()
-                && message.taker_token.cw20[0].address == token.address {
+                && message.taker_token.cw20[0].address == token.address
+            {
                 return Err(ContractError::OrderInvalid(String::from(
-                    "Maker and taker tokens cannot be the same cw20 tokens.")))
+                    "Maker and taker tokens cannot be the same cw20 tokens.",
+                )));
             }
             GenericBalance {
                 native: vec![],
@@ -131,39 +143,36 @@ pub fn execute_close_order(
     taker_address: &Addr,
     order_id: u64,
 ) -> Result<Response, ContractError> {
-
     // TODO: Do we need to handle invalid order_id with a different ContractError?
     // find the Order from the id
     let mut order = ORDERS.load(deps.storage, order_id.into())?;
     if !order.is_open {
-        return Err(ContractError::OrderClosed {})
+        return Err(ContractError::OrderClosed {});
     }
 
     // Reject if target address exists and is not equal to the order taker address
     match &order.target_address {
         Some(target_address) => {
             if taker_address.clone() != deps.api.addr_validate(target_address.as_str())? {
-                return Err(ContractError::OrderReserved {})
+                return Err(ContractError::OrderReserved {});
             }
-        },
-        _ => {},
+        }
+        _ => {}
     };
 
     let taker_order_balance = match balance {
-        Balance::Native(balance) =>
-            GenericBalance {
-                native: balance.0,
-                cw20: vec![],
-            },
-        Balance::Cw20(token) =>
-            GenericBalance {
-                native: vec![],
-                cw20: vec![token],
-            }
+        Balance::Native(balance) => GenericBalance {
+            native: balance.0,
+            cw20: vec![],
+        },
+        Balance::Cw20(token) => GenericBalance {
+            native: vec![],
+            cw20: vec![token],
+        },
     };
 
     if taker_order_balance != order.taker_token {
-        return Err(ContractError::OrderUnmatched {})
+        return Err(ContractError::OrderUnmatched {});
     }
 
     order.is_open = false;
@@ -217,15 +226,17 @@ fn query_order(deps: Deps, id: u64) -> StdResult<OrderResponse> {
         maker_token: order.maker_token,
         taker_token: order.taker_token,
         target_address: order.target_address,
-        is_open: order.is_open
+        is_open: order.is_open,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info, MockApi, MockQuerier, MockStorage};
-    use cosmwasm_std::{coins, Empty, OwnedDeps, CosmosMsg};
+    use cosmwasm_std::testing::{
+        mock_dependencies, mock_env, mock_info, MockApi, MockQuerier, MockStorage,
+    };
+    use cosmwasm_std::{coins, CosmosMsg, Empty, OwnedDeps};
 
     #[test]
     fn order_native_to_cw20() {
@@ -243,7 +254,13 @@ mod tests {
         let maker = String::from("maker");
         let balance = coins(100, "native");
         let info = mock_info(&maker, &balance);
-        let res = execute(deps.as_mut(), mock_env(), info, ExecuteMsg::OpenOrder(msg.clone())).unwrap();
+        let res = execute(
+            deps.as_mut(),
+            mock_env(),
+            info,
+            ExecuteMsg::OpenOrder(msg.clone()),
+        )
+        .unwrap();
         assert_eq!(0, res.messages.len());
         assert_eq!(("method", "open_order"), res.attributes[0]);
         assert_eq!(("order_id", "1"), res.attributes[1]);
@@ -261,7 +278,7 @@ mod tests {
         let receive = Cw20ReceiveMsg {
             sender: taker.clone(),
             amount: cw20_token_amount,
-            msg: to_binary(&ExecuteMsg::CloseOrder{ order_id: 1 }).unwrap(),
+            msg: to_binary(&ExecuteMsg::CloseOrder { order_id: 1 }).unwrap(),
         };
         let info = mock_info(&cw20_token_contract, &[]);
         let msg = ExecuteMsg::Receive(receive.clone());
@@ -324,7 +341,10 @@ mod tests {
         // Check that order is correctly opened
         let order = query_order(deps.as_ref(), 1).unwrap();
         assert_eq!(maker, order.maker_address.as_str());
-        assert_eq!(create_cw20_tokens(&cw20_token_contract, cw20_token_amount).cw20, order.maker_token.cw20);
+        assert_eq!(
+            create_cw20_tokens(&cw20_token_contract, cw20_token_amount).cw20,
+            order.maker_token.cw20
+        );
         assert_eq!(native_tokens.native, order.taker_token.native);
         assert_eq!(None, order.target_address);
         assert_eq!(true, order.is_open);
@@ -333,7 +353,13 @@ mod tests {
         let taker = String::from("taker");
         let balance = coins(100, "native");
         let info = mock_info(&taker, &balance);
-        let res = execute(deps.as_mut(), mock_env(), info, ExecuteMsg::CloseOrder{ order_id: 1 }).unwrap();
+        let res = execute(
+            deps.as_mut(),
+            mock_env(),
+            info,
+            ExecuteMsg::CloseOrder { order_id: 1 },
+        )
+        .unwrap();
         assert_eq!(2, res.messages.len());
         assert_eq!(("method", "close_order"), res.attributes[0]);
         assert_eq!(("order_id", "1"), res.attributes[1]);
@@ -393,8 +419,10 @@ mod tests {
         // Check that order is correctly opened
         let order = query_order(deps.as_ref(), 1).unwrap();
         assert_eq!(maker, order.maker_address.as_str());
-        assert_eq!(create_cw20_tokens(&abc_token_contract, abc_token_amount).cw20,
-                   order.maker_token.cw20);
+        assert_eq!(
+            create_cw20_tokens(&abc_token_contract, abc_token_amount).cw20,
+            order.maker_token.cw20
+        );
         assert_eq!(xyz_tokens.cw20, order.taker_token.cw20);
         assert_eq!(None, order.target_address);
         assert_eq!(true, order.is_open);
@@ -404,10 +432,16 @@ mod tests {
         let receive = Cw20ReceiveMsg {
             sender: taker.clone(),
             amount: xyz_token_amount,
-            msg: to_binary(&ExecuteMsg::CloseOrder{ order_id: 1 }).unwrap(),
+            msg: to_binary(&ExecuteMsg::CloseOrder { order_id: 1 }).unwrap(),
         };
         let info = mock_info(&xyz_token_contract, &[]);
-        let res = execute(deps.as_mut(), mock_env(), info, ExecuteMsg::Receive(receive)).unwrap();
+        let res = execute(
+            deps.as_mut(),
+            mock_env(),
+            info,
+            ExecuteMsg::Receive(receive),
+        )
+        .unwrap();
         assert_eq!(2, res.messages.len());
         assert_eq!(("method", "close_order"), res.attributes[0]);
         assert_eq!(("order_id", "1"), res.attributes[1]);
@@ -456,19 +490,37 @@ mod tests {
         };
         let maker = String::from("maker");
         let first_order_balance = coins(100, "native");
-        let res = execute(deps.as_mut(), mock_env(), mock_info(&maker, &first_order_balance), ExecuteMsg::OpenOrder(msg.clone())).unwrap();
+        let res = execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info(&maker, &first_order_balance),
+            ExecuteMsg::OpenOrder(msg.clone()),
+        )
+        .unwrap();
         assert_eq!(0, res.messages.len());
         assert_eq!(("method", "open_order"), res.attributes[0]);
         assert_eq!(("order_id", "1"), res.attributes[1]);
 
         let second_order_balance = coins(200, "native");
-        let res = execute(deps.as_mut(), mock_env(), mock_info(&maker, &second_order_balance),ExecuteMsg::OpenOrder(msg.clone())).unwrap();
+        let res = execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info(&maker, &second_order_balance),
+            ExecuteMsg::OpenOrder(msg.clone()),
+        )
+        .unwrap();
         assert_eq!(0, res.messages.len());
         assert_eq!(("method", "open_order"), res.attributes[0]);
         assert_eq!(("order_id", "2"), res.attributes[1]);
 
         let third_order_balance = coins(300, "native");
-        let res = execute(deps.as_mut(), mock_env(), mock_info(&maker, &third_order_balance), ExecuteMsg::OpenOrder(msg.clone())).unwrap();
+        let res = execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info(&maker, &third_order_balance),
+            ExecuteMsg::OpenOrder(msg.clone()),
+        )
+        .unwrap();
         assert_eq!(0, res.messages.len());
         assert_eq!(("method", "open_order"), res.attributes[0]);
         assert_eq!(("order_id", "3"), res.attributes[1]);
@@ -498,7 +550,13 @@ mod tests {
         let maker = String::from("maker");
         let balance = coins(100, "native");
         let info = mock_info(&maker, &balance);
-        let res = execute(deps.as_mut(), mock_env(), info, ExecuteMsg::OpenOrder(msg.clone())).unwrap();
+        let res = execute(
+            deps.as_mut(),
+            mock_env(),
+            info,
+            ExecuteMsg::OpenOrder(msg.clone()),
+        )
+        .unwrap();
         assert_eq!(0, res.messages.len());
         assert_eq!(("method", "open_order"), res.attributes[0]);
         assert_eq!(("order_id", "1"), res.attributes[1]);
@@ -507,7 +565,7 @@ mod tests {
         let receive = Cw20ReceiveMsg {
             sender: String::from("taker"),
             amount: Uint128::new(12345),
-            msg: to_binary(&ExecuteMsg::CloseOrder{ order_id: 1 }).unwrap(),
+            msg: to_binary(&ExecuteMsg::CloseOrder { order_id: 1 }).unwrap(),
         };
         let info = mock_info(&cw20_token_contract, &[]);
         let msg = ExecuteMsg::Receive(receive.clone());
@@ -531,7 +589,13 @@ mod tests {
         let maker = String::from("maker");
         let balance = coins(100, "native");
         let info = mock_info(&maker, &balance);
-        let res = execute(deps.as_mut(), mock_env(), info, ExecuteMsg::OpenOrder(msg.clone())).unwrap();
+        let res = execute(
+            deps.as_mut(),
+            mock_env(),
+            info,
+            ExecuteMsg::OpenOrder(msg.clone()),
+        )
+        .unwrap();
         assert_eq!(0, res.messages.len());
         assert_eq!(("method", "open_order"), res.attributes[0]);
         assert_eq!(("order_id", "1"), res.attributes[1]);
@@ -540,7 +604,7 @@ mod tests {
         let receive = Cw20ReceiveMsg {
             sender: String::from("target"),
             amount: Uint128::new(12345),
-            msg: to_binary(&ExecuteMsg::CloseOrder{ order_id: 1 }).unwrap(),
+            msg: to_binary(&ExecuteMsg::CloseOrder { order_id: 1 }).unwrap(),
         };
         let info = mock_info(&cw20_token_contract, &[]);
         let msg = ExecuteMsg::Receive(receive.clone());
@@ -566,7 +630,13 @@ mod tests {
         let maker = String::from("maker");
         let balance = coins(100, "native");
         let info = mock_info(&maker, &balance);
-        let res = execute(deps.as_mut(), mock_env(), info, ExecuteMsg::OpenOrder(msg.clone())).unwrap();
+        let res = execute(
+            deps.as_mut(),
+            mock_env(),
+            info,
+            ExecuteMsg::OpenOrder(msg.clone()),
+        )
+        .unwrap();
         assert_eq!(0, res.messages.len());
         assert_eq!(("method", "open_order"), res.attributes[0]);
         assert_eq!(("order_id", "1"), res.attributes[1]);
@@ -578,7 +648,7 @@ mod tests {
         let receive = Cw20ReceiveMsg {
             sender: String::from("taker"),
             amount: wrong_token_amount,
-            msg: to_binary(&ExecuteMsg::CloseOrder{ order_id: 1 }).unwrap(),
+            msg: to_binary(&ExecuteMsg::CloseOrder { order_id: 1 }).unwrap(),
         };
         let info = mock_info(&wrong_token_contract, &[]);
         let msg = ExecuteMsg::Receive(receive.clone());
@@ -612,7 +682,7 @@ mod tests {
     }
 
     fn instantiate_contract(deps: &mut OwnedDeps<MockStorage, MockApi, MockQuerier, Empty>) {
-        let msg = InstantiateMsg { };
+        let msg = InstantiateMsg {};
         let info = mock_info("anyone", &[]);
         let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
         assert_eq!(0, res.messages.len());

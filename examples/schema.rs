@@ -3,7 +3,7 @@ use std::fs::create_dir_all;
 
 use cosmwasm_schema::{export_schema, remove_schemas, schema_for};
 
-use orderbook_escrow::msg::{OrderResponse, ExecuteMsg, InstantiateMsg, QueryMsg};
+use orderbook_escrow::msg::{ExecuteMsg, InstantiateMsg, OrderResponse, QueryMsg};
 use orderbook_escrow::state::State;
 
 fn main() {
