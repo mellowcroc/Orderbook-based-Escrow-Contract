@@ -1,0 +1,1 @@
+b9f473441c32a30f70ab3767656584fdc8d0563beb401c4c26afde012a562304  ./target/wasm32-unknown-unknown/release/orderbook_escrow.wasm

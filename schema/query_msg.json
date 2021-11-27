@@ -5,11 +5,21 @@
     {
       "type": "object",
       "required": [
-        "get_count"
+        "order"
       ],
       "properties": {
-        "get_count": {
-          "type": "object"
+        "order": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
         }
       },
       "additionalProperties": false
